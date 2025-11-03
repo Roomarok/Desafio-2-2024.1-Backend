@@ -1,14 +1,15 @@
 -- =========================================================
--- DATABASE & CONFIG
+-- SCRIPT 1 - DDL (MySQL 8.0) - CRIAÇÃO DO ESQUEMA
 -- =========================================================
+
+-- ===== Database =====
 CREATE DATABASE IF NOT EXISTS transito
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_0900_ai_ci;
 USE transito;
 
--- Opcional: limpeza segura para reexecução do script
+-- (Opcional) Limpeza para reexecução do DDL
 SET FOREIGN_KEY_CHECKS = 0;
-
 DROP TABLE IF EXISTS infracao;
 DROP TABLE IF EXISTS agente_transito;
 DROP TABLE IF EXISTS tipoinfracao;
@@ -19,12 +20,9 @@ DROP TABLE IF EXISTS categoria;
 DROP TABLE IF EXISTS endereco;
 DROP TABLE IF EXISTS telefone;
 DROP TABLE IF EXISTS proprietario;
-
 SET FOREIGN_KEY_CHECKS = 1;
 
--- =========================================================
--- TABELA: PROPRIETARIO
--- =========================================================
+-- ===== PROPRIETARIO =====
 CREATE TABLE IF NOT EXISTS proprietario (
     cpf              VARCHAR(14)  NOT NULL,
     data_nascimento  DATE NULL,
@@ -34,10 +32,7 @@ CREATE TABLE IF NOT EXISTS proprietario (
     CONSTRAINT chk_idade_prop CHECK (idade IS NULL OR (idade BETWEEN 16 AND 120))
 ) ENGINE=InnoDB;
 
--- =========================================================
--- TABELA: TELEFONE
--- (muitos telefones por proprietário; cada telefone pertence a, no máx., 1 proprietário)
--- =========================================================
+-- ===== TELEFONE (muitos por proprietário; FK opcional) =====
 CREATE TABLE IF NOT EXISTS telefone (
     ddd              SMALLINT UNSIGNED NOT NULL,
     numero           VARCHAR(20) NOT NULL,
@@ -53,10 +48,7 @@ CREATE TABLE IF NOT EXISTS telefone (
 
 CREATE INDEX idx_telefone_prop ON telefone (proprietario_cpf);
 
--- =========================================================
--- TABELA: ENDERECO
--- (cada endereço pertence a exatamente 1 proprietário; proprietário pode ter vários endereços)
--- =========================================================
+-- ===== ENDERECO (1..N por proprietário; FK obrigatória) =====
 CREATE TABLE IF NOT EXISTS endereco (
     id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     proprietario_cpf VARCHAR(14) NOT NULL,
@@ -77,9 +69,7 @@ CREATE TABLE IF NOT EXISTS endereco (
 
 CREATE INDEX idx_endereco_prop ON endereco (proprietario_cpf);
 
--- =========================================================
--- TABELA: CATEGORIA (de veículo)
--- =========================================================
+-- ===== CATEGORIA =====
 CREATE TABLE IF NOT EXISTS categoria (
     num_serie_cat  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     nome           VARCHAR(60) NOT NULL,
@@ -87,9 +77,7 @@ CREATE TABLE IF NOT EXISTS categoria (
     CONSTRAINT uq_categoria_nome UNIQUE (nome)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- TABELA: MODELO (de veículo)
--- =========================================================
+-- ===== MODELO =====
 CREATE TABLE IF NOT EXISTS modelo (
     num_serie_mod  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     nome           VARCHAR(80) NOT NULL,
@@ -97,15 +85,12 @@ CREATE TABLE IF NOT EXISTS modelo (
     CONSTRAINT uq_modelo_nome UNIQUE (nome)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- TABELA: VEICULO
--- (veículo pode existir sem proprietário: FK opcional)
--- =========================================================
+-- ===== VEICULO (FKs: categoria, modelo, proprietario opcional) =====
 CREATE TABLE IF NOT EXISTS veiculo (
     placa             VARCHAR(10)  NOT NULL,
     chassi            VARCHAR(30)  NOT NULL,
     cor               VARCHAR(30)  NULL,
-    ano               INT NULL, -- validação via TRIGGER (não pode usar CURDATE em CHECK)
+    ano               INT NULL, -- validado por triggers
     categoria_id      BIGINT UNSIGNED NOT NULL,
     modelo_id         BIGINT UNSIGNED NOT NULL,
     proprietario_cpf  VARCHAR(14) NULL,
@@ -132,13 +117,10 @@ CREATE INDEX idx_veiculo_categoria  ON veiculo (categoria_id);
 CREATE INDEX idx_veiculo_modelo     ON veiculo (modelo_id);
 CREATE INDEX idx_veiculo_prop       ON veiculo (proprietario_cpf);
 
--- =========================================================
--- TABELA: LOCAL (da infração)
--- (nomeado como local_infracao para evitar conflito com palavra reservada)
--- =========================================================
+-- ===== LOCAL_INFRACAO =====
 CREATE TABLE IF NOT EXISTS local_infracao (
     id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    local_nome      VARCHAR(120) NULL,           -- rótulo/descrição do local
+    local_nome      VARCHAR(120) NULL,
     latitude        DECIMAL(9,6)  NOT NULL,
     longitude       DECIMAL(9,6)  NOT NULL,
     velocidade_max  SMALLINT UNSIGNED NULL,
@@ -150,9 +132,7 @@ CREATE TABLE IF NOT EXISTS local_infracao (
 
 CREATE INDEX idx_local_geo ON local_infracao (latitude, longitude);
 
--- =========================================================
--- TABELA: TIPOINFRACAO
--- =========================================================
+-- ===== TIPOINFRACAO =====
 CREATE TABLE IF NOT EXISTS tipoinfracao (
     codigo           VARCHAR(10) NOT NULL,
     valor_atribuido  DECIMAL(10,2) NOT NULL,
@@ -160,9 +140,7 @@ CREATE TABLE IF NOT EXISTS tipoinfracao (
     CONSTRAINT chk_valor_atr CHECK (valor_atribuido >= 0)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- TABELA: AGENTE_DE_TRANSITO
--- =========================================================
+-- ===== AGENTE_TRANSITO =====
 CREATE TABLE IF NOT EXISTS agente_transito (
     matricula         VARCHAR(20) NOT NULL,
     nome              VARCHAR(120) NOT NULL,
@@ -171,13 +149,10 @@ CREATE TABLE IF NOT EXISTS agente_transito (
     CONSTRAINT pk_agente PRIMARY KEY (matricula)
 ) ENGINE=InnoDB;
 
--- =========================================================
--- TABELA: INFRACAO
--- (cada infração: 1 veículo, 1 local, 1 tipo, 1 agente)
--- =========================================================
+-- ===== INFRACAO (FKs: veiculo, local, tipo, agente) =====
 CREATE TABLE IF NOT EXISTS infracao (
     id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    momento            DATETIME NOT NULL,                 -- data+hora (seu "momento")
+    momento            DATETIME NOT NULL,
     velocidade_aferida DECIMAL(6,2) NULL,
     veiculo_placa      VARCHAR(10) NOT NULL,
     local_id           BIGINT UNSIGNED NOT NULL,
@@ -211,8 +186,9 @@ CREATE TABLE IF NOT EXISTS infracao (
 
     CONSTRAINT chk_vel_aferida CHECK (velocidade_aferida IS NULL OR velocidade_aferida >= 0),
 
-    -- Evita duplicidade acidental (mesmo instante/veículo/local/tipo)
-    CONSTRAINT uq_infracao_unica_no_instante UNIQUE (momento, veiculo_placa, local_id, tipo_codigo)
+    -- Evita duplicidade no mesmo instante para o mesmo veículo/local/tipo
+    CONSTRAINT uq_infracao_unica_no_instante
+        UNIQUE (momento, veiculo_placa, local_id, tipo_codigo)
 ) ENGINE=InnoDB;
 
 CREATE INDEX idx_infracao_momento ON infracao (momento);
@@ -221,10 +197,7 @@ CREATE INDEX idx_infracao_local   ON infracao (local_id);
 CREATE INDEX idx_infracao_tipo    ON infracao (tipo_codigo);
 CREATE INDEX idx_infracao_agente  ON infracao (agente_matricula);
 
--- =========================================================
--- TRIGGERS para validar 'ano' do veículo
--- (substituem o CHECK com CURDATE() que o MySQL não permite)
--- =========================================================
+-- ===== TRIGGERS para validar 'ano' do veículo =====
 DELIMITER //
 
 CREATE TRIGGER veiculo_chk_ano_ins
